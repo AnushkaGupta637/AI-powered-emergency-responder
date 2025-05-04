@@ -1,14 +1,78 @@
-import { Suspense } from 'react';
+'use client';
+
+import React, { Suspense } from 'react';
 import { AlertCircle, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmergencyInputForm } from '@/components/emergency-input-form';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import Link from 'next/link';
+import { useEffect } from 'react';
+import { EmergencyContact } from '@/services/emergency-contacts';
+import { toast } from "@/hooks/use-toast";
+import { useRouter } from 'next/navigation';
+import { sendEmergencyAlert } from '@/services/emergency-contacts';
+import { getCurrentLocation } from '@/services/location';
 
 export default function Home() {
   // Placeholder: Check if setup is complete (e.g., from local storage or user state)
-  const isSetupComplete = false; // Replace with actual logic
+  const [isSetupComplete, setIsSetupComplete] = React.useState(false); // Updated to useState
+  const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedData = localStorage.getItem('lifeline_ai_setup');
+      setIsSetupComplete(!!storedData); // Check if data exists
+    }
+  }, []);
+
+  const handleExtremeEmergency = async () => {
+    try {
+      const storedData = localStorage.getItem('lifeline_ai_setup');
+      if (!storedData) {
+        toast({
+          title: "Setup Required",
+          description: "Please set up your emergency profile before using this feature.",
+          variant: "destructive",
+        });
+        router.push('/setup');
+        return;
+      }
+
+      const parsedData = JSON.parse(storedData);
+      const emergencyContacts: EmergencyContact[] = parsedData.emergencyContacts;
+      const medicalInfo = `Medical History: ${parsedData.medicalHistory || 'N/A'}, Allergies: ${parsedData.allergies || 'N/A'}, Medications: ${parsedData.medications || 'N/A'}, Blood Type: ${parsedData.bloodType || 'N/A'}`;
+
+      if (!emergencyContacts || emergencyContacts.length === 0) {
+        toast({
+          title: "No Contacts",
+          description: "Please add emergency contacts to your profile.",
+          variant: "destructive",
+        });
+        router.push('/setup');
+        return;
+      }
+
+      const location = await getCurrentLocation();
+
+      await sendEmergencyAlert(location, medicalInfo, emergencyContacts);
+
+      toast({
+        title: "Emergency Alert Sent",
+        description: "Your location and medical information have been sent to your emergency contacts.",
+      });
+
+       // TODO: Implement sending location and medical info to contacts & hospitals via an API.
+       // TODO: Implement calling emergency services API
+    } catch (error: any) {
+      console.error("Error sending emergency alert:", error);
+      toast({
+        title: "Emergency Alert Failed",
+        description: "Failed to send emergency alert. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-secondary">
@@ -43,7 +107,7 @@ export default function Home() {
 
         {/* Extreme Emergency Button - placed lower for potential easier reach */}
         <div className="mt-8 w-full max-w-xs">
-           <Button variant="destructive" size="lg" className="w-full py-6 text-lg font-bold flex items-center gap-2">
+           <Button variant="destructive" size="lg" className="w-full py-6 text-lg font-bold flex items-center gap-2" onClick={handleExtremeEmergency}>
             <AlertCircle className="h-6 w-6" />
             Extreme Emergency
            </Button>
