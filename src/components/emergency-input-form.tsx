@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Mic, Image as ImageIcon, Send, FileText, Languages, Volume2, AlertCircle } from 'lucide-react';
+import { Mic, Image as ImageIcon, Send, FileText, Languages, Volume2, AlertCircle, Thermometer } from 'lucide-react'; // Added Thermometer for severity
 import { imageAidedDiagnosis } from '@/ai/flows/image-aided-diagnosis';
 import { emergencyResponseOffline } from '@/ai/flows/emergency-response-offline';
 import { localizeEmergencyAdvice } from '@/ai/flows/localize-emergency-advice';
@@ -61,7 +61,8 @@ const speak = (text: string, lang: string = 'en') => {
 export function EmergencyInputForm() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<{ diagnosis?: string; firstAidInstructions: string } | null>(null);
+  // Updated result state to include severity
+  const [result, setResult] = useState<{ diagnosis?: string; firstAidInstructions: string; severity?: string } | null>(null);
   const [selectedTab, setSelectedTab] = useState<'text' | 'voice' | 'image'>('text');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false); // State for voice input
@@ -169,8 +170,15 @@ export function EmergencyInputForm() {
     setResult(null);
     setProgress(10); // Start progress
 
+    // Acknowledge Python code integration limitation
+    if (selectedTab === 'image') {
+        console.info("Note: Direct Python ML model integration is complex in this environment. Using Genkit flow to simulate image analysis including severity estimation.");
+    }
+
+
     try {
-      let response: { diagnosis?: string; firstAidInstructions: string } | null = null;
+      // Updated response type to include severity
+      let response: { diagnosis?: string; firstAidInstructions: string; severity?: string } | null = null;
       let userInput = values.textDescription || '';
       const targetLanguage = values.language || 'en';
 
@@ -183,9 +191,10 @@ export function EmergencyInputForm() {
         reader.onload = async () => {
           const imageDataUri = reader.result as string;
           try {
+            // Call the updated imageAidedDiagnosis flow
             const diagnosisResult = await imageAidedDiagnosis({
               imageDataUri,
-              description: values.textDescription || 'Image of injury', // Provide some context
+              description: values.textDescription || 'Analyze the injury in the image', // Provide context
             });
              setProgress(70);
              response = diagnosisResult;
@@ -212,7 +221,8 @@ export function EmergencyInputForm() {
                  emergencyDescription: values.textDescription,
              });
              setProgress(70);
-             response = offlineResult;
+             // Offline model doesn't provide severity in this simulation
+             response = { ...offlineResult, severity: 'Unknown (Offline Mode)' };
              userInput = values.textDescription;
              finalizeResponse(response, userInput, targetLanguage);
 
@@ -220,12 +230,16 @@ export function EmergencyInputForm() {
              // Fallback to cloud LLM if offline fails or if needed (simulation)
              console.warn("Offline AI failed, trying cloud AI:", offlineError);
              toast({ title: "Offline Mode Failed", description: "Trying online assistance...", variant: "default"});
-             // Simulate calling a different/more capable cloud flow if needed
-             // For now, we'll retry the offline one as a placeholder
+             // Simulate calling a cloud flow that might provide severity (using image flow for simulation)
              try {
-                const cloudResult = await emergencyResponseOffline({ emergencyDescription: values.textDescription });
+                // Re-using image flow's prompt style for severity estimation via text
+                const cloudResult = await imageAidedDiagnosis({
+                    imageDataUri: '', // No image, rely on description
+                    description: values.textDescription
+                });
+
                 setProgress(70);
-                response = cloudResult;
+                response = cloudResult; // Cloud result includes severity
                 userInput = values.textDescription;
                 finalizeResponse(response, userInput, targetLanguage);
              } catch (cloudError) {
@@ -244,13 +258,14 @@ export function EmergencyInputForm() {
   };
 
   const finalizeResponse = async (
-      response: { diagnosis?: string; firstAidInstructions: string } | null,
+      response: { diagnosis?: string; firstAidInstructions: string; severity?: string } | null, // Include severity
       userInput: string,
       targetLanguage: string
       ) => {
        if (response) {
           if (targetLanguage !== 'en') { // Translate if not English
               try {
+                  // Translate only the advice, keep diagnosis/severity standard for now
                   const localizationResult = await localizeEmergencyAdvice({
                       userInput: userInput, // Send original user input for potential translation context
                       advice: response.firstAidInstructions,
@@ -258,8 +273,9 @@ export function EmergencyInputForm() {
                   });
                   setProgress(90);
                   setResult({
-                      diagnosis: response.diagnosis, // Diagnosis usually stays in a standard language or is simple enough
+                      diagnosis: response.diagnosis,
                       firstAidInstructions: localizationResult.translatedAdvice,
+                      severity: response.severity, // Keep severity as is
                   });
                   toast({ title: "Success", description: "Received translated first aid advice." });
               } catch (translationError) {
@@ -289,6 +305,16 @@ export function EmergencyInputForm() {
       });
       setIsLoading(false);
       setProgress(0);
+  };
+
+  // Helper to get severity color
+  const getSeverityColor = (severity?: string): string => {
+      if (!severity) return 'text-muted-foreground'; // Default
+      const lowerSeverity = severity.toLowerCase();
+      if (lowerSeverity.includes('critical') || lowerSeverity.includes('severe')) return 'text-destructive';
+      if (lowerSeverity.includes('moderate')) return 'text-yellow-600 dark:text-yellow-400'; // Using Tailwind yellow
+      if (lowerSeverity.includes('minor') || lowerSeverity.includes('low')) return 'text-green-600 dark:text-green-400'; // Using Tailwind green
+      return 'text-muted-foreground';
   };
 
   return (
@@ -323,6 +349,7 @@ export function EmergencyInputForm() {
                     <option value="en">English</option>
                     <option value="es">Español (Spanish)</option>
                     <option value="fr">Français (French)</option>
+                     <option value="de">Deutsch (German)</option>
                     <option value="hi">हिन्दी (Hindi)</option>
                     {/* Add more languages as needed */}
                   </select>
@@ -392,7 +419,7 @@ export function EmergencyInputForm() {
                       <FormLabel>Optional: Add context for the image</FormLabel>
                       <FormControl>
                         <Textarea
-                          placeholder="e.g., 'What is this rash?', 'How bad is this burn?'"
+                          placeholder="e.g., 'What is this rash?', 'How bad is this burn? Describe visible bleeding, depth, color changes.'"
                           className="resize-none"
                           rows={2}
                           {...field}
@@ -440,20 +467,30 @@ export function EmergencyInputForm() {
 
         <Button type="submit" disabled={isLoading} className="w-full">
           <Send className="h-4 w-4 mr-2"/>
-          {isLoading ? 'Getting Help...' : 'Get First Aid Advice'}
+          {isLoading ? 'Analyzing...' : 'Get First Aid Advice'}
         </Button>
 
         {isLoading && <Progress value={progress} className="w-full" />}
 
         {result && (
           <Card className="mt-6 bg-secondary border-primary/30">
-             <CardHeader className="pb-2">
+             <CardHeader className="pb-2 space-y-1">
                 {result.diagnosis && <CardTitle className="text-lg">Possible Diagnosis:</CardTitle>}
                 {result.diagnosis && <p className="text-md font-medium">{result.diagnosis}</p>}
+                 {/* Display Severity */}
+                {result.severity && (
+                    <div className="flex items-center pt-2">
+                        <Thermometer className={`h-5 w-5 mr-1.5 ${getSeverityColor(result.severity)}`} />
+                        <p className={`text-md font-semibold ${getSeverityColor(result.severity)}`}>
+                            Severity: {result.severity}
+                        </p>
+                    </div>
+                )}
               </CardHeader>
             <CardContent className="space-y-2">
-                <h3 className="text-lg font-semibold mt-4">First Aid Instructions:</h3>
-                <div className="prose prose-sm max-w-none whitespace-pre-wrap">{result.firstAidInstructions}</div>
+                <h3 className="text-lg font-semibold mt-2">First Aid Instructions:</h3>
+                {/* Use prose-invert for dark mode compatibility */}
+                <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">{result.firstAidInstructions}</div>
             </CardContent>
             <CardFooter className="flex justify-end">
                <Button variant="ghost" size="sm" onClick={() => speak(result.firstAidInstructions, language)}>
@@ -464,7 +501,7 @@ export function EmergencyInputForm() {
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Disclaimer</AlertTitle>
                 <AlertDescription>
-                  This AI advice is for informational purposes only and not a substitute for professional medical help. Call emergency services if needed.
+                  This AI advice is for informational purposes only and not a substitute for professional medical help. Call emergency services if needed. Severity estimation is experimental.
                 </AlertDescription>
             </Alert>
           </Card>
